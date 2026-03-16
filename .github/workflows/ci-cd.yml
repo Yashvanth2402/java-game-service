@@ -1,0 +1,173 @@
+name: Java Spring Boot CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write # Required for pushing Docker images to GHCR
+  id-token: write # Required for OIDC, good practice for cloud deployments
+
+env:
+  JAVA_VERSION: '17'
+  MAVEN_CACHE_KEY: 'maven-{{ hashFiles('**/pom.xml') }}'
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'maven'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ env.MAVEN_CACHE_KEY }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+
+      - name: Run Unit Tests
+        run: mvn test
+
+      - name: Upload Surefire Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-reports
+          path: target/surefire-reports
+
+      - name: OWASP Dependency-Check
+        uses: jeremylong/dependency-check-action@v1
+        id: dependency-check
+        with:
+          project: ${{ github.event.repository.name }}
+          format: 'HTML,JSON'
+          args: '--scan target --exclude target/classes'
+
+      - name: Upload Dependency-Check Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-check-report
+          path: ${{ steps.dependency-check.outputs.reportPath }}
+
+      - name: Snyk Code and Open Source Scan
+        uses: snyk/actions/maven@master
+        with:
+          args: --all-projects --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  docker-build-and-push:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write # Required to push to GHCR
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy Container Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: 'table'
+          exit-code: '1' # Fail if critical/high vulnerabilities are found
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  deploy-staging:
+    needs: docker-build-and-push
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up ArgoCD CLI
+        uses: argoproj/argocd-action@v2
+        with:
+          version: latest
+
+      - name: ArgoCD Login
+        run: argocd login ${{ secrets.ARGO_SERVER }} --username ${{ secrets.ARGO_USERNAME }} --password ${{ secrets.ARGO_PASSWORD }} --insecure --grpc-web # --insecure for self-signed certs, remove if using trusted certs
+
+      - name: Update Staging Application Image
+        # This simulates updating Helm values by setting an image tag parameter in ArgoCD
+        run: argocd app set ${{ secrets.ARGO_APP_NAME_STAGING }} -p image.tag=${{ github.sha }}
+
+      - name: Sync Staging Application
+        run: argocd app sync ${{ secrets.ARGO_APP_NAME_STAGING }}
+
+  manual-approval-prod:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://prod.example.com # Replace with actual production URL
+    steps:
+      - name: Manual Approval for Production Deployment
+        run: echo "Waiting for manual approval to deploy to production..."
+
+  deploy-prod:
+    needs: manual-approval-prod
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up ArgoCD CLI
+        uses: argoproj/argocd-action@v2
+        with:
+          version: latest
+
+      - name: ArgoCD Login
+        run: argocd login ${{ secrets.ARGO_SERVER }} --username ${{ secrets.ARGO_USERNAME }} --password ${{ secrets.ARGO_PASSWORD }} --insecure --grpc-web # --insecure for self-signed certs, remove if using trusted certs
+
+      - name: Update Production Application Image
+        # This simulates updating Helm values by setting an image tag parameter in ArgoCD
+        run: argocd app set ${{ secrets.ARGO_APP_NAME_PROD }} -p image.tag=${{ github.sha }}
+
+      - name: Sync Production Application
+        run: argocd app sync ${{ secrets.ARGO_APP_NAME_PROD }}
