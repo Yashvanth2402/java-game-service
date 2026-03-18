@@ -1,0 +1,43 @@
+# Helm Testing Pipeline Standard — EXACT TEMPLATE
+
+Use this EXACT structure for helm-test.yml:
+```yaml
+name: Helm Chart Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'helm/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'helm/**'
+  workflow_dispatch:
+
+jobs:
+  helm-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v1
+        with:
+          version: v3.10.0
+
+      - name: Helm Lint
+        run: helm lint helm
+
+      - name: Helm Template Staging
+        run: helm template java-game-service helm -f helm/values.yaml -f helm/values-staging.yaml --debug
+
+      - name: Helm Template Production
+        run: helm template java-game-service helm -f helm/values.yaml -f helm/values-prod.yaml --debug
+
+      - name: Helm Dry Run Install
+        run: helm install java-game-service helm --dry-run --debug
+```
