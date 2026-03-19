@@ -1,18 +1,21 @@
-replicaCount: 2
+replicaCount: 3
 
 image:
-  repository: us-central1-docker.pkg.dev/project-166a7983-818b-43fa-932/cicd-agent-repo/java-game-service
-  pullPolicy: Always
-  tag: "latest"
-
-service:
-  type: ClusterIP
-  port: 8080
+  tag: "v1.0.0"
 
 resources:
   requests:
-    memory: "512Mi"
-    cpu: "500m"
-  limits:
     memory: "1Gi"
     cpu: "1000m"
+  limits:
+    memory: "2Gi"
+    cpu: "2000m"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 6
+
+env:
+  - name: ENV
+    value: prod
