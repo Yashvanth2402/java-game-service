@@ -1,0 +1,13 @@
+replicaCount: 2
+
+image:
+  tag: "rc"
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+
+env:
+  - name: ENV
+    value: stage
