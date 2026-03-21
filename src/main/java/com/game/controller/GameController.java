@@ -1,4 +1,4 @@
-package com.game;
+package com.game.controller;
 
 import org.springframework.web.bind.annotation.*;
 import java.util.*;
@@ -45,9 +45,11 @@ public class GameController {
         if (id < 0 || id >= ANSWERS.size()) {
             return Map.of("error", "Question not found");
         }
+
         String userAnswer = body.getOrDefault("answer", "");
         boolean correct = ANSWERS.get(id)
-            .equalsIgnoreCase(userAnswer.trim());
+                .equalsIgnoreCase(userAnswer.trim());
+
         return Map.of(
             "correct", correct,
             "correctAnswer", ANSWERS.get(id)
@@ -57,12 +59,17 @@ public class GameController {
     @GetMapping("/questions")
     public Map<String, Object> getAllQuestions() {
         List<Map<String, Object>> questions = new ArrayList<>();
+
         for (int i = 0; i < QUESTIONS.size(); i++) {
             questions.add(Map.of(
                 "id", i,
                 "question", QUESTIONS.get(i)
             ));
         }
-        return Map.of("questions", questions, "total", questions.size());
+
+        return Map.of(
+            "questions", questions,
+            "total", questions.size()
+        );
     }
 }
